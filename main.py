@@ -1,96 +1,116 @@
 import os
 import time
 import praw
+import feedparser
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime, timezone, timedelta
 
-# ======================
+# -------------------------
 # Reddit authentication
-# ======================
+# -------------------------
 reddit = praw.Reddit(
-    client_id=os.environ["REDDIT_CLIENT_ID"],
-    client_secret=os.environ["REDDIT_CLIENT_SECRET"],
-    username=os.environ["REDDIT_USERNAME"],
-    password=os.environ["REDDIT_PASSWORD"],
-    user_agent="multi-site-news-bot"
+    client_id=os.getenv("REDDIT_CLIENT_ID"),
+    client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
+    user_agent="XnX-News-Bot",
+    username=os.getenv("REDDIT_USERNAME"),
+    password=os.getenv("REDDIT_PASSWORD")
 )
 
-subreddit_name = os.environ["SUBREDDIT"]
-flair_text = os.environ.get("FLAIR_TEXT", "MOD: Official News!")  # default if not set
+SUBREDDIT_NAME = "XnghanAndXoul"  # <-- change this to your subreddit name
+POST_FLAIR_TEXT = "MOD: Official News!"  # flair text
+KEYWORDS = ["xnghan", "xoul", "seunghan", "xnghan&xoul"]
 
-# ======================
-# Utility Functions
-# ======================
-def get_kst_time():
-    return datetime.now(timezone.utc) + timedelta(hours=9)
-
-def scrape_site(url, css_selector, site_name):
-    """Scrape latest post title + link from a site."""
-    try:
-        res = requests.get(url, timeout=10)
-        res.raise_for_status()
-        soup = BeautifulSoup(res.text, "html.parser")
-        post = soup.select_one(css_selector)
-        if post:
-            title = post.get_text(strip=True)
-            link = post.get("href")
-            if link and not link.startswith("http"):
-                link = url.rstrip("/") + "/" + link.lstrip("/")
-            return f"[{site_name}] {title}", link
-    except Exception as e:
-        print(f"Error scraping {site_name}: {e}")
-    return None, None
-
-def get_flair_id(subreddit, flair_text):
-    """Find flair ID that matches the flair text."""
-    for template in subreddit.flair.link_templates:
-        if template["text"] == flair_text:
-            return template["id"]
-    raise ValueError(f"Flair '{flair_text}' not found in subreddit '{subreddit.display_name}'")
-
-# ======================
-# Scraping Sources
-# ======================
-sources = [
-    ("https://www.soompi.com", "h6 a", "Soompi"),
-    ("https://www.billboard.com/section/k-town", "h3 a", "Billboard K-Town"),
-    ("https://www.kpopmap.com", "h3 a", "Kpopmap"),
-    ("https://www.seoulspace.com", "h3 a", "SeoulSpace"),
+# -------------------------
+# Feeds setup
+# -------------------------
+FEEDS = [
+    ("https://www.soompi.com/feed", None, "Soompi"),
+    ("https://www.billboard.com/pro/k-pop/", "h3 a", "Billboard K-Town"),
+    ("https://www.kpopmap.com/feed/", None, "Kpopmap"),
+    ("https://www.seoulspace.com/feed/", None, "SeoulSpace"),
 ]
 
-# Track already posted links
-posted_links = set()
+# -------------------------
+# Helper functions
+# -------------------------
 
-# ======================
-# Main Loop
-# ======================
+def get_rss_articles(url):
+    """Parse RSS feed and return (title, link) list."""
+    feed = feedparser.parse(url)
+    return [(entry.title, entry.link) for entry in feed.entries]
+
+def scrape_billboard(url, selector):
+    """Scrape Billboard page headlines since RSS is dead."""
+    try:
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        articles = []
+        for a in soup.select(selector):
+            title = a.get_text(strip=True)
+            link = a.get("href")
+            if link and not link.startswith("http"):
+                link = "https://www.billboard.com" + link
+            articles.append((title, link))
+        return articles
+    except Exception as e:
+        print("Error scraping Billboard:", e)
+        return []
+
+def matches_keywords(title):
+    """Check if title contains any of our keywords."""
+    return any(k in title.lower() for k in KEYWORDS)
+
+def get_flair_id(subreddit, flair_text):
+    """Fetch the flair ID for the given text."""
+    for flair in subreddit.flair.link_templates:
+        if flair["text"] == flair_text:
+            return flair["id"]
+    return None
+
+# -------------------------
+# Main loop
+# -------------------------
 def main():
-    subreddit = reddit.subreddit(subreddit_name)
-    flair_id = get_flair_id(subreddit, flair_text)
-    print(f"[INIT] Using flair: {flair_text} (id={flair_id})")
+    subreddit = reddit.subreddit(SUBREDDIT_NAME)
+    flair_id = get_flair_id(subreddit, POST_FLAIR_TEXT)
+    if not flair_id:
+        print(f"[ERROR] Flair '{POST_FLAIR_TEXT}' not found in r/{SUBREDDIT_NAME}")
+        return
+
+    posted_links = set()
 
     while True:
-        for url, selector, site_name in sources:
-            title, link = scrape_site(url, selector, site_name)
-            if title and link and link not in posted_links:
-                try:
-                    kst_time = get_kst_time().strftime("%Y-%m-%d %H:%M KST")
-                    full_title = f"{title} | {kst_time}"
-                    print(f"[POSTING] {full_title} -> {link}")
+        for url, selector, label in FEEDS:
+            if selector:  # Billboard scrape
+                articles = scrape_billboard(url, selector)
+            else:  # RSS feeds
+                articles = get_rss_articles(url)
 
-                    subreddit.submit(
-                        title=full_title,
-                        selftext=link,
-                        flair_id=flair_id
+            for title, link in articles:
+                if link in posted_links:
+                    continue
+                if not matches_keywords(title):
+                    print(f"[SKIP] {title}")
+                    continue
+
+                try:
+                    submission = subreddit.submit(
+                        title=f"[{label}] {title}",
+                        url=link,
+                        flair_id=flair_id,
+                        resubmit=False
                     )
                     posted_links.add(link)
+                    print(f"[POSTED] {title} -> {submission.shortlink}")
                 except Exception as e:
-                    print(f"Error posting to Reddit: {e}")
+                    print(f"[ERROR posting] {title} | {e}")
 
-        print("[WAIT] Sleeping 5 minutes...")
-        time.sleep(300)  # 5 minutes
+        print("Sleeping for 15 minutes...")
+        time.sleep(900)
 
-
+# -------------------------
+# Run bot
+# -------------------------
 if __name__ == "__main__":
     main()
