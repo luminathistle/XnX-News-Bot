@@ -1,7 +1,7 @@
 praw
+feedparser
 requests
 beautifulsoup4
 schedule
 pytz
 lxml
-feedparser
