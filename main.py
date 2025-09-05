@@ -102,9 +102,13 @@ def main():
                         resubmit=False
                     )
                     posted_links.add(link)
-                    print(f"[POSTED] {title} -> {submission.shortlink}")
-                except Exception as e:
-                    print(f"[ERROR posting] {title} | {e}")
+                    
+        # ✅ Extra confirmation
+        print(f"[POSTED] {title} -> {submission.shortlink}")
+        print(f"[FLAIR] Applied '{POST_FLAIR_TEXT}' to {submission.shortlink}")
+           
+ except Exception as e:
+     print(f"[ERROR posting] {title} | {e}")
 
         print("Sleeping for 15 minutes...")
         time.sleep(900)
