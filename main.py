@@ -88,27 +88,27 @@ def main():
                 articles = get_rss_articles(url)
 
             for title, link in articles:
-                if link in posted_links:
-                    continue
-                if not matches_keywords(title):
-                    print(f"[SKIP] {title}")
-                    continue
+    if link in posted_links:
+        continue
+    if not matches_keywords(title):
+        print(f"[SKIP] {title}")
+        continue
 
-                try:
-                    submission = subreddit.submit(
-                        title=f"[{label}] {title}",
-                        url=link,
-                        flair_id=flair_id,
-                        resubmit=False
-                    )
-                    posted_links.add(link)
-                    
+    try:
+        submission = subreddit.submit(
+            title=f"[{label}] {title}",
+            url=link,
+            flair_id=flair_id,
+            resubmit=False
+        )
+        posted_links.add(link)
+
         # ✅ Extra confirmation
         print(f"[POSTED] {title} -> {submission.shortlink}")
         print(f"[FLAIR] Applied '{POST_FLAIR_TEXT}' to {submission.shortlink}")
-           
- except Exception as e:
-     print(f"[ERROR posting] {title} | {e}")
+
+    except Exception as e:
+        print(f"[ERROR posting] {title} | {e}")
 
         print("Sleeping for 15 minutes...")
         time.sleep(900)
