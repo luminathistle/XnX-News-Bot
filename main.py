@@ -15,7 +15,6 @@ POSTED_FILE = "posted_links.json"
 
 # ------------------ KEYWORDS ------------------
 
-# English keywords (case-insensitive)
 MAIN_KEYWORDS_EN = [
     "xnghan",
     "xoul",
@@ -24,7 +23,6 @@ MAIN_KEYWORDS_EN = [
     "seunghan"
 ]
 
-# Hangul keywords (exact match)
 MAIN_KEYWORDS_HANGUL = [
     "엑스한",
     "서울",
@@ -33,7 +31,6 @@ MAIN_KEYWORDS_HANGUL = [
 ]
 
 def contains_main_keyword(text: str) -> bool:
-    """Return True if any MAIN_KEYWORDS appear in text."""
     if not text:
         return False
     text_lower = text.lower()
@@ -84,7 +81,6 @@ def save_posted(posted):
 KST = pytz.timezone("Asia/Seoul")
 
 def parse_date(entry, link=None):
-    """Return datetime with tzinfo (KST fallback)."""
     if hasattr(entry, "published_parsed") and entry.published_parsed:
         return datetime(*entry.published_parsed[:6], tzinfo=pytz.utc)
     if link:
@@ -102,7 +98,6 @@ def parse_date(entry, link=None):
     return None
 
 def format_title(pub_date, title):
-    """Format post title with today / original date."""
     today_kst = datetime.now(KST).date()
     if not pub_date:
         return f"{today_kst.isoformat()} - [XNGHAN & XOUL] {title}"
@@ -115,14 +110,11 @@ def format_title(pub_date, title):
 # ------------------ FILTERING ------------------
 
 def is_relevant(entry):
-    """Check if entry contains main keywords, including page fallback."""
     title = getattr(entry, "title", "") if hasattr(entry, "title") else entry.get("title", "")
     summary = getattr(entry, "summary", "") if hasattr(entry, "summary") else entry.get("summary", "")
     combined = f"{title}\n{summary}"
     if contains_main_keyword(combined):
         return True
-
-    # fallback: fetch page text
     try:
         link = getattr(entry, "link", "") if hasattr(entry, "link") else entry.get("link", "")
         if link:
@@ -135,7 +127,6 @@ def is_relevant(entry):
 
 # ------------------ REDDIT AUTH ------------------
 
-# Secret-only approach using environment variables
 reddit = praw.Reddit(
     client_id=os.getenv("REDDIT_CLIENT_ID"),
     client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
@@ -145,8 +136,7 @@ reddit = praw.Reddit(
 )
 
 SUBREDDIT_NAME = os.getenv("SUBREDDIT", "XnghanAndXoul")
-POST_FLAIR_TEXT = os.getenv("FLAIR_TEXT", "MOD: Official Updates!")
-
+POST_FLAIR_ID = os.getenv("POST_FLAIR_ID")  # <-- Use flair ID, not text
 subreddit = reddit.subreddit(SUBREDDIT_NAME)
 
 # ------------------ MAIN LOOP ------------------
@@ -166,14 +156,19 @@ def run_bot():
                         continue
 
                     pub_date = parse_date(entry, entry.link)
-
-                    # Post old content too
                     post_title = format_title(pub_date, entry.title)
-                    subreddit.submit(title=post_title, url=entry.link, flair_text=POST_FLAIR_TEXT)
+
+                    # Submit with flair ID
+                    subreddit.submit(
+                        title=post_title,
+                        url=entry.link,
+                        flair_id=POST_FLAIR_ID
+                    )
+
                     posted.add(entry.link)
                     save_posted(posted)
                     print(f"[POSTED] {post_title} ({source})")
-                    time.sleep(5)  # 5-second delay between posts
+                    time.sleep(5)  # 5-second delay
 
             # HTML feeds
             else:
@@ -189,11 +184,16 @@ def run_bot():
                         continue
 
                     post_title = format_title(None, title)
-                    subreddit.submit(title=post_title, url=link, flair_text=POST_FLAIR_TEXT)
+                    subreddit.submit(
+                        title=post_title,
+                        url=link,
+                        flair_id=POST_FLAIR_ID
+                    )
+
                     posted.add(link)
                     save_posted(posted)
                     print(f"[POSTED] {post_title} ({source})")
-                    time.sleep(5)  # 5-second delay between posts
+                    time.sleep(5)  # 5-second delay
 
         except Exception as e:
             print(f"[ERROR] {source}: {e}")
