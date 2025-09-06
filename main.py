@@ -149,24 +149,26 @@ def run_bot():
             # RSS/Youtube feeds
             if url.endswith(".xml") or "feed" in url or "rss" in url or "youtube" in url:
                 feed = feedparser.parse(url)
-                
-                # Filter relevant entries first
-                entries_to_post = [
-                    e for e in feed.entries
-                    if is_relevant(e)
-                    and any(k.lower() in e.title.lower() for k in ["xnghan", "xoul"])
-                    and e.link not in posted
-                ]
 
                 # Post oldest first
-                for entry in reversed(entries_to_post):
+                for entry in reversed(feed.entries):
+                    title_lower = entry.title.lower()
+
+                    # Strict check: must contain BOTH xnghan and xoul
+                    if "xnghan" not in title_lower or "xoul" not in title_lower:
+                        continue
+                    if entry.link in posted:
+                        continue
+
                     pub_date = parse_date(entry, entry.link)
                     post_title = format_title(pub_date, entry.title)
+
                     subreddit.submit(
                         title=post_title,
                         url=entry.link,
                         flair_id=POST_FLAIR_ID
                     )
+
                     posted.add(entry.link)
                     save_posted(posted)
                     print(f"[POSTED] {post_title} ({source})")
@@ -184,10 +186,11 @@ def run_bot():
                     title = a.get_text(strip=True)
                     if not link or link in posted:
                         continue
-                    if not is_relevant({"title": title}):
+
+                    title_lower = title.lower()
+                    if "xnghan" not in title_lower or "xoul" not in title_lower:
                         continue
-                    if not any(k.lower() in title.lower() for k in ["xnghan","xoul"]):
-                        continue
+
                     entries_to_post.append((link, title))
 
                 # Post oldest first
