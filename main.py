@@ -10,24 +10,14 @@ from datetime import datetime
 import pytz
 
 # ------------------ SETTINGS ------------------
-
 POSTED_FILE = "posted_links.json"
 
 # ------------------ KEYWORDS ------------------
-
 MAIN_KEYWORDS_EN = [
-    "xnghan",
-    "xoul",
-    "xnghan & xoul",
-    "xnghan and xoul",
-    "seunghan"
+    "xnghan", "xoul", "xnghan & xoul", "xnghan and xoul", "seunghan"
 ]
-
 MAIN_KEYWORDS_HANGUL = [
-    "엑스한",
-    "서울",
-    "승한",
-    "승한앤소울"
+    "엑스한", "서울", "승한", "승한앤소울"
 ]
 
 def contains_main_keyword(text: str) -> bool:
@@ -43,7 +33,6 @@ def contains_main_keyword(text: str) -> bool:
     return False
 
 # ------------------ FEEDS ------------------
-
 XNGHAN_CHANNEL_ID = "UCMqkl3MPfMH1JWQhwmdfkSw"
 SMTOWN_CHANNEL_ID = "UCEf_Bc-KVd7onSeifS3py9g"
 
@@ -59,7 +48,6 @@ FEEDS = [
 ]
 
 # ------------------ FILE STORAGE ------------------
-
 def load_posted():
     if os.path.exists(POSTED_FILE):
         try:
@@ -77,7 +65,6 @@ def save_posted(posted):
         print("[ERROR] Failed to save posted links:", e)
 
 # ------------------ DATE HANDLING ------------------
-
 KST = pytz.timezone("Asia/Seoul")
 
 def parse_date(entry, link=None):
@@ -108,13 +95,14 @@ def format_title(pub_date, title):
         return f"{today_kst.isoformat()} / {pub_date_kst.isoformat()} - [XNGHAN & XOUL] {title}"
 
 # ------------------ FILTERING ------------------
-
 def is_relevant(entry):
     title = getattr(entry, "title", "") if hasattr(entry, "title") else entry.get("title", "")
     summary = getattr(entry, "summary", "") if hasattr(entry, "summary") else entry.get("summary", "")
     combined = f"{title}\n{summary}"
+
     if contains_main_keyword(combined):
         return True
+
     try:
         link = getattr(entry, "link", "") if hasattr(entry, "link") else entry.get("link", "")
         if link:
@@ -123,10 +111,10 @@ def is_relevant(entry):
                 return True
     except Exception:
         pass
+
     return False
 
 # ------------------ REDDIT AUTH ------------------
-
 reddit = praw.Reddit(
     client_id=os.getenv("REDDIT_CLIENT_ID"),
     client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
@@ -136,11 +124,10 @@ reddit = praw.Reddit(
 )
 
 SUBREDDIT_NAME = os.getenv("SUBREDDIT", "XnghanAndXoul")
-POST_FLAIR_ID = os.getenv("POST_FLAIR_ID")  # flair ID, required for mod-only posting
+POST_FLAIR_ID = os.getenv("POST_FLAIR_ID")
 subreddit = reddit.subreddit(SUBREDDIT_NAME)
 
 # ------------------ MAIN LOOP ------------------
-
 def run_bot():
     posted = load_posted()
 
@@ -152,23 +139,34 @@ def run_bot():
 
                 # Post oldest first
                 for entry in reversed(feed.entries):
-                    title_lower = entry.title.lower()
+                    title = getattr(entry, "title", "")
+                    summary = getattr(entry, "summary", "")
+                    combined = f"{title}\n{summary}"
 
-                    # Strict check: must contain BOTH xnghan and xoul
-                    if "xnghan" not in title_lower or "xoul" not in title_lower:
-                        continue
+                    if not contains_main_keyword(combined):
+                        try:
+                            link = getattr(entry, "link", "")
+                            if link:
+                                page_text = requests.get(link, timeout=6, headers={"User-Agent": os.getenv("REDDIT_USER_AGENT", "XnX-News-Bot")}).text
+                                if not contains_main_keyword(page_text):
+                                    print(f"[SKIPPED] {title} (no keyword match)")
+                                    continue
+                        except Exception:
+                            print(f"[SKIPPED] {title} (failed keyword scan)")
+                            continue
+
                     if entry.link in posted:
+                        print(f"[SKIPPED] {title} (already posted)")
                         continue
 
                     pub_date = parse_date(entry, entry.link)
-                    post_title = format_title(pub_date, entry.title)
+                    post_title = format_title(pub_date, title)
 
                     subreddit.submit(
                         title=post_title,
                         url=entry.link,
                         flair_id=POST_FLAIR_ID
                     )
-
                     posted.add(entry.link)
                     save_posted(posted)
                     print(f"[POSTED] {post_title} ({source})")
@@ -179,18 +177,20 @@ def run_bot():
                 r = requests.get(url, timeout=5)
                 soup = BeautifulSoup(r.text, "html.parser")
                 items = soup.select(selector) if selector else []
-
                 entries_to_post = []
+
                 for a in items:
                     link = a.get("href")
                     title = a.get_text(strip=True)
-                    if not link or link in posted:
+                    if not link:
+                        print(f"[SKIPPED] {title} (no link)")
                         continue
-
-                    title_lower = title.lower()
-                    if "xnghan" not in title_lower or "xoul" not in title_lower:
+                    if link in posted:
+                        print(f"[SKIPPED] {title} (already posted)")
                         continue
-
+                    if not contains_main_keyword(title):
+                        print(f"[SKIPPED] {title} (no keyword match)")
+                        continue
                     entries_to_post.append((link, title))
 
                 # Post oldest first
@@ -211,6 +211,5 @@ def run_bot():
             traceback.print_exc()
 
 # ------------------ RUN ------------------
-
 if __name__ == "__main__":
     run_bot()
