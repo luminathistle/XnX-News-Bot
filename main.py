@@ -136,7 +136,7 @@ reddit = praw.Reddit(
 )
 
 SUBREDDIT_NAME = os.getenv("SUBREDDIT", "XnghanAndXoul")
-POST_FLAIR_ID = os.getenv("POST_FLAIR_ID")  # <-- Use flair ID, not text
+POST_FLAIR_ID = os.getenv("POST_FLAIR_ID")  # flair ID, required for mod-only posting
 subreddit = reddit.subreddit(SUBREDDIT_NAME)
 
 # ------------------ MAIN LOOP ------------------
@@ -149,16 +149,13 @@ def run_bot():
             # RSS/Youtube feeds
             if url.endswith(".xml") or "feed" in url or "rss" in url or "youtube" in url:
                 feed = feedparser.parse(url)
-                for entry in feed.entries:
-                    if entry.link in posted:
-                        continue
-                    if not is_relevant(entry):
-                        continue
-
+                
+                # Post oldest first
+                entries_to_post = [e for e in feed.entries if is_relevant(e) and any(k.lower() in e.title.lower() for k in ["xnghan","xoul"]) and e.link not in posted]
+                for entry in reversed(entries_to_post):
                     pub_date = parse_date(entry, entry.link)
                     post_title = format_title(pub_date, entry.title)
 
-                    # Submit with flair ID
                     subreddit.submit(
                         title=post_title,
                         url=entry.link,
@@ -168,13 +165,15 @@ def run_bot():
                     posted.add(entry.link)
                     save_posted(posted)
                     print(f"[POSTED] {post_title} ({source})")
-                    time.sleep(5)  # 5-second delay
+                    time.sleep(5)
 
             # HTML feeds
             else:
                 r = requests.get(url, timeout=5)
                 soup = BeautifulSoup(r.text, "html.parser")
                 items = soup.select(selector) if selector else []
+
+                entries_to_post = []
                 for a in items:
                     link = a.get("href")
                     title = a.get_text(strip=True)
@@ -182,24 +181,6 @@ def run_bot():
                         continue
                     if not is_relevant({"title": title}):
                         continue
-
-                    post_title = format_title(None, title)
-                    subreddit.submit(
-                        title=post_title,
-                        url=link,
-                        flair_id=POST_FLAIR_ID
-                    )
-
-                    posted.add(link)
-                    save_posted(posted)
-                    print(f"[POSTED] {post_title} ({source})")
-                    time.sleep(5)  # 5-second delay
-
-        except Exception as e:
-            print(f"[ERROR] {source}: {e}")
-            traceback.print_exc()
-
-# ------------------ RUN ------------------
-
-if __name__ == "__main__":
-    run_bot()
+                    if not any(k.lower() in title.lower() for k in ["xnghan","xoul"]):
+                        continue
+                    entries_to_post.append((link, title))
