@@ -150,18 +150,23 @@ def run_bot():
             if url.endswith(".xml") or "feed" in url or "rss" in url or "youtube" in url:
                 feed = feedparser.parse(url)
                 
+                # Filter relevant entries first
+                entries_to_post = [
+                    e for e in feed.entries
+                    if is_relevant(e)
+                    and any(k.lower() in e.title.lower() for k in ["xnghan", "xoul"])
+                    and e.link not in posted
+                ]
+
                 # Post oldest first
-                entries_to_post = [e for e in feed.entries if is_relevant(e) and any(k.lower() in e.title.lower() for k in ["xnghan","xoul"]) and e.link not in posted]
                 for entry in reversed(entries_to_post):
                     pub_date = parse_date(entry, entry.link)
                     post_title = format_title(pub_date, entry.title)
-
                     subreddit.submit(
                         title=post_title,
                         url=entry.link,
                         flair_id=POST_FLAIR_ID
                     )
-
                     posted.add(entry.link)
                     save_posted(posted)
                     print(f"[POSTED] {post_title} ({source})")
@@ -184,3 +189,25 @@ def run_bot():
                     if not any(k.lower() in title.lower() for k in ["xnghan","xoul"]):
                         continue
                     entries_to_post.append((link, title))
+
+                # Post oldest first
+                for link, title in entries_to_post:
+                    post_title = format_title(None, title)
+                    subreddit.submit(
+                        title=post_title,
+                        url=link,
+                        flair_id=POST_FLAIR_ID
+                    )
+                    posted.add(link)
+                    save_posted(posted)
+                    print(f"[POSTED] {post_title} ({source})")
+                    time.sleep(5)
+
+        except Exception as e:
+            print(f"[ERROR] {source}: {e}")
+            traceback.print_exc()
+
+# ------------------ RUN ------------------
+
+if __name__ == "__main__":
+    run_bot()
