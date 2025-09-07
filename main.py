@@ -158,7 +158,7 @@ def fetch_feed(feed_url, selector=None):
         log(f"[ERROR] Failed to fetch feed {feed_url}: {e}")
         return []
 
-# ------------------ MAIN POSTER ------------------
+# ------------------ COLLECT ------------------
 def collect_all_items():
     all_items = []
 
@@ -181,10 +181,9 @@ def collect_all_items():
     all_items.sort(key=lambda x: x[0])
     return all_items
 
-def post_all():
+# ------------------ POSTING ------------------
+def post_items(items, tag="[POSTED]"):
     posted = load_posted()
-    items = collect_all_items()
-
     for pub_date, title, link in items:
         if link in posted:
             log(f"[SKIPPED] {title} (already posted)")
@@ -199,15 +198,25 @@ def post_all():
             )
             posted.add(link)
             save_posted(posted)
-            log(f"[POSTED] {title}")
+            log(f"{tag} {title}")
             time.sleep(5)
         except Exception as e:
             log(f"[ERROR] Failed to post {title}: {e}")
 
 # ------------------ MAIN ------------------
 if __name__ == "__main__":
+    # 1) ARCHIVE MODE (run once)
+    log("Starting ARCHIVE MODE (posting oldest → newest)...")
+    archive_items = collect_all_items()
+    post_items(archive_items, tag="[ARCHIVE POSTED]")
+    log("============================================================")
+    log("✅ Archive complete! Bot is now in LIVE MODE (every 5 min).")
+    log("============================================================")
+
+    # 2) LIVE MODE (forever loop)
     while True:
-        log("Starting new cycle...")
-        post_all()
-        log("Cycle complete. Sleeping 60 seconds...\n")
-        time.sleep(60)  # sleep 1 minute
+        log("Starting LIVE MODE cycle...")
+        live_items = collect_all_items()
+        post_items(live_items, tag="[LIVE POSTED]")
+        log("Live cycle complete. Sleeping 300 seconds...\n")
+        time.sleep(300)  # 5 minutes
