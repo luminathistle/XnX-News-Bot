@@ -12,6 +12,7 @@ from pytube import Channel
 
 # ------------------ SETTINGS ------------------
 POSTED_FILE = "posted_links.json"
+START_DATE = datetime(2025, 7, 1, tzinfo=pytz.utc)  # Archive start date (July 1, 2025)
 
 # ------------------ KEYWORDS ------------------
 MAIN_KEYWORDS_EN = [
@@ -159,30 +160,49 @@ def fetch_feed(feed_url, selector=None):
         log(f"[ERROR] Failed to fetch feed {feed_url}: {e}")
         return []
 
+# ------------------ REDDIT DUPLICATE CHECK ------------------
+def get_existing_links():
+    existing_links = set()
+    try:
+        for submission in subreddit.new(limit=None):
+            if submission.url:
+                existing_links.add(submission.url)
+    except Exception as e:
+        log(f"[WARN] Failed to fetch existing subreddit posts: {e}")
+    return existing_links
+
 # ------------------ COLLECT ------------------
-def collect_all_items():
+def collect_all_items(live_mode=False):
     all_items = []
-    seen_links = set()
+    seen_links = get_existing_links()  # include existing subreddit posts
 
     # YouTube: XngHan & SMTOWN
     for url in [XNGHAN_CHANNEL_URL, SMTOWN_CHANNEL_URL]:
         for vid in fetch_youtube_channel_videos(url):
-            if vid["url"] not in seen_links:
-                all_items.append((vid["date"], vid["title"], vid["url"]))
-                seen_links.add(vid["url"])
+            if vid["url"] in seen_links:
+                log(f"[SKIPPED] {vid['title']} (already posted)")
+                continue
+            if not live_mode and vid["date"] < START_DATE:
+                log(f"[SKIPPED] {vid['title']} (before archive start date)")
+                continue
+            all_items.append((vid["date"], vid["title"], vid["url"]))
+            seen_links.add(vid["url"])
 
     # Feeds
     for feed_url, selector, source in FEEDS:
         items = fetch_feed(feed_url, selector)
         for link, title, entry in items:
+            if link in seen_links:
+                log(f"[SKIPPED] {title} (already posted)")
+                continue
             if not contains_main_keyword(title):
                 log(f"[SKIPPED] {title} (no keyword)")
                 continue
-            if link in seen_links:
-                log(f"[SKIPPED] {title} (duplicate link in feeds)")
+            pub_date = parse_date(entry, link) or datetime.now(pytz.utc)
+            if not live_mode and pub_date < START_DATE:
+                log(f"[SKIPPED] {title} (before archive start date)")
                 continue
-            pub_date = parse_date(entry, link) if entry else None
-            all_items.append((pub_date or datetime.now(pytz.utc), title, link))
+            all_items.append((pub_date, title, link))
             seen_links.add(link)
 
     all_items.sort(key=lambda x: x[0])
@@ -215,7 +235,7 @@ def post_items(items, tag="[POSTED]"):
 if __name__ == "__main__":
     # 1) ARCHIVE MODE (run once)
     log("Starting ARCHIVE MODE (posting oldest → newest)...")
-    archive_items = collect_all_items()
+    archive_items = collect_all_items(live_mode=False)
     post_items(archive_items, tag="[ARCHIVE POSTED]")
     log("============================================================")
     log("✅ Archive complete! Bot is now in LIVE MODE (every 5 min).")
@@ -224,7 +244,7 @@ if __name__ == "__main__":
     # 2) LIVE MODE (forever loop)
     while True:
         log("Starting LIVE MODE cycle...")
-        live_items = collect_all_items()
+        live_items = collect_all_items(live_mode=True)
         post_items(live_items, tag="[LIVE POSTED]")
         log("Live cycle complete. Sleeping 300 seconds...\n")
         time.sleep(300)  # 5 min per cycle
