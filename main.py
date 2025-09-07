@@ -66,8 +66,8 @@ def save_posted(posted):
     try:
         with open(POSTED_FILE, "w", encoding="utf-8") as f:
             json.dump(list(posted), f)
-        except Exception as e:
-            log(f"[ERROR] Failed to save posted links: {e}")
+    except Exception as e:
+        log(f"[ERROR] Failed to save posted links: {e}")
 
 # ------------------ DATE HANDLING ------------------
 KST = pytz.timezone("Asia/Seoul")
@@ -162,11 +162,14 @@ def fetch_feed(feed_url, selector=None):
 # ------------------ COLLECT ------------------
 def collect_all_items():
     all_items = []
+    seen_links = set()
 
     # YouTube: XngHan & SMTOWN
     for url in [XNGHAN_CHANNEL_URL, SMTOWN_CHANNEL_URL]:
         for vid in fetch_youtube_channel_videos(url):
-            all_items.append((vid["date"], vid["title"], vid["url"]))
+            if vid["url"] not in seen_links:
+                all_items.append((vid["date"], vid["title"], vid["url"]))
+                seen_links.add(vid["url"])
 
     # Feeds
     for feed_url, selector, source in FEEDS:
@@ -175,8 +178,12 @@ def collect_all_items():
             if not contains_main_keyword(title):
                 log(f"[SKIPPED] {title} (no keyword)")
                 continue
+            if link in seen_links:
+                log(f"[SKIPPED] {title} (duplicate link in feeds)")
+                continue
             pub_date = parse_date(entry, link) if entry else None
             all_items.append((pub_date or datetime.now(pytz.utc), title, link))
+            seen_links.add(link)
 
     all_items.sort(key=lambda x: x[0])
     return all_items
