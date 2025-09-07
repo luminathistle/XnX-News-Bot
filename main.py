@@ -66,8 +66,8 @@ def save_posted(posted):
     try:
         with open(POSTED_FILE, "w", encoding="utf-8") as f:
             json.dump(list(posted), f)
-    except Exception as e:
-        log(f"[ERROR] Failed to save posted links: {e}")
+        except Exception as e:
+            log(f"[ERROR] Failed to save posted links: {e}")
 
 # ------------------ DATE HANDLING ------------------
 KST = pytz.timezone("Asia/Seoul")
@@ -89,15 +89,16 @@ def parse_date(entry, link=None):
             pass
     return None
 
-def format_title(pub_date, title):
+# ------------------ TITLE FORMATTING ------------------
+def format_title(pub_date, title, mode="LIVE"):
     today_kst = datetime.now(KST).date()
     if not pub_date:
-        return f"{today_kst.isoformat()} - {title}"
+        return f"[{mode}] [{today_kst.isoformat()}] - {title}"
     pub_date_kst = pub_date.astimezone(KST).date()
-    if pub_date_kst == today_kst:
-        return f"{today_kst.isoformat()} - {title}"
+    if mode == "LIVE":
+        return f"[{mode}] [{today_kst.isoformat()}] - {title}"
     else:
-        return f"{today_kst.isoformat()} / {pub_date_kst.isoformat()} - {title}"
+        return f"[{mode}] [{pub_date_kst.isoformat()}] - {title}"
 
 # ------------------ LOGGING ------------------
 def get_log_file():
@@ -177,19 +178,19 @@ def collect_all_items():
             pub_date = parse_date(entry, link) if entry else None
             all_items.append((pub_date or datetime.now(pytz.utc), title, link))
 
-    # sort oldest → newest
     all_items.sort(key=lambda x: x[0])
     return all_items
 
 # ------------------ POSTING ------------------
 def post_items(items, tag="[POSTED]"):
     posted = load_posted()
+    mode = "ARCHIVE" if "ARCHIVE" in tag else "LIVE"
     for pub_date, title, link in items:
         if link in posted:
             log(f"[SKIPPED] {title} (already posted)")
             continue
 
-        post_title = format_title(pub_date, title)
+        post_title = format_title(pub_date, title, mode=mode)
         try:
             subreddit.submit(
                 title=post_title,
@@ -199,7 +200,7 @@ def post_items(items, tag="[POSTED]"):
             posted.add(link)
             save_posted(posted)
             log(f"{tag} {title}")
-            time.sleep(5)
+            time.sleep(5)  # 5 sec between posts
         except Exception as e:
             log(f"[ERROR] Failed to post {title}: {e}")
 
@@ -219,4 +220,4 @@ if __name__ == "__main__":
         live_items = collect_all_items()
         post_items(live_items, tag="[LIVE POSTED]")
         log("Live cycle complete. Sleeping 300 seconds...\n")
-        time.sleep(300)  # 5 minutes
+        time.sleep(300)  # 5 min per cycle
