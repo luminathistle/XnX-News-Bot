@@ -1,140 +1,141 @@
 import os
-import time
-import praw
-import feedparser
-import requests
-from bs4 import BeautifulSoup
-import traceback
 import json
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 import pytz
-import re
-from pytube import Channel
+import requests
+import feedparser
+from googleapiclient.discovery import build
+import praw
 
 # ------------------ SETTINGS ------------------
+SUBREDDIT = os.getenv("SUBREDDIT", "XnghanAndXoul")
+POST_FLAIR_ID = os.getenv("POST_FLAIR_ID")  # Reddit flair ID
+START_DATE = datetime(2025, 9, 8, tzinfo=timezone.utc)  # Start date for bot
 POSTED_FILE = "posted_links.json"
 
-# Timezone
-KST = pytz.timezone("Asia/Seoul")
+# ------------------ ENV VARS ------------------
+REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
+REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
+REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT")
+REDDIT_USERNAME = os.getenv("REDDIT_USERNAME")
+REDDIT_PASSWORD = os.getenv("REDDIT_PASSWORD")
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
-# ------------------ REDDIT SETUP ------------------
+# ------------------ INITIALIZE ------------------
 reddit = praw.Reddit(
-    client_id=os.getenv("REDDIT_CLIENT_ID"),
-    client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
-    user_agent=os.getenv("REDDIT_USER_AGENT"),
-    username=os.getenv("REDDIT_USERNAME"),
-    password=os.getenv("REDDIT_PASSWORD")
+    client_id=REDDIT_CLIENT_ID,
+    client_secret=REDDIT_CLIENT_SECRET,
+    user_agent=REDDIT_USER_AGENT,
+    username=REDDIT_USERNAME,
+    password=REDDIT_PASSWORD,
 )
 
-SUBREDDIT_NAME = "YourSubreddit"
-subreddit = reddit.subreddit(SUBREDDIT_NAME)
+youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
 
-POST_FLAIR_ID = os.getenv("POST_FLAIR_ID")  # Replace with your flair ID
-
-# ------------------ POSTED LINKS ------------------
+# ------------------ HELPER FUNCTIONS ------------------
 def load_posted():
-    if not os.path.exists(POSTED_FILE):
-        return set()
-    with open(POSTED_FILE, "r", encoding="utf-8") as f:
-        return set(json.load(f))
+    if os.path.exists(POSTED_FILE):
+        with open(POSTED_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return []
 
 def save_posted(posted):
     with open(POSTED_FILE, "w", encoding="utf-8") as f:
-        json.dump(list(posted), f, ensure_ascii=False, indent=2)
+        json.dump(posted, f, indent=2, ensure_ascii=False)
 
-# ------------------ LOGGING ------------------
-def log(message):
-    print(f"[{datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}] {message}")
+def format_title(title, original_date):
+    today = datetime.now(pytz.timezone("Asia/Seoul")).strftime("%Y-%m-%d")
+    if original_date.date() < datetime.now(pytz.timezone("Asia/Seoul")).date():
+        orig = original_date.strftime("%Y-%m-%d")
+        return f"[{today} / {orig}] - {title}"
+    else:
+        return f"[{today}] - {title}"
 
-# ------------------ TITLE FORMATTING ------------------
-def format_title(pub_date, title):
-    today_kst = datetime.now(KST).date()
-    pub_date_kst = pub_date.astimezone(KST).date()
+def fetch_youtube_videos(channel_id):
+    videos = []
+    next_page_token = None
+    while True:
+        res = youtube.search().list(
+            part="snippet",
+            channelId=channel_id,
+            maxResults=50,
+            order="date",
+            pageToken=next_page_token,
+            type="video",
+        ).execute()
+        for item in res.get("items", []):
+            video_id = item["id"]["videoId"]
+            title = item["snippet"]["title"]
+            published_at = datetime.fromisoformat(item["snippet"]["publishedAt"].replace("Z", "+00:00"))
+            videos.append({
+                "url": f"https://www.youtube.com/watch?v={video_id}",
+                "title": title,
+                "date": published_at
+            })
+        next_page_token = res.get("nextPageToken")
+        if not next_page_token:
+            break
+    return sorted(videos, key=lambda x: x["date"])  # oldest first
 
-    if pub_date_kst < today_kst:  # Old post
-        return f"[{today_kst} / {pub_date_kst}] - {title}"
-    else:  # New post
-        return f"[{today_kst}] - {title}"
+def fetch_rss_articles(url):
+    feed = feedparser.parse(url)
+    articles = []
+    for entry in feed.entries:
+        published = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+        articles.append({
+            "url": entry.link,
+            "title": entry.title,
+            "date": published
+        })
+    return sorted(articles, key=lambda x: x["date"])  # oldest first
 
-# ------------------ POSTING ------------------
-def post_items(items, tag="[POSTED]"):
-    posted = load_posted()
-
-    today_kst = datetime.now(KST).date()
-    old_items = [(d, t, l) for d, t, l in items if d.astimezone(KST).date() < today_kst]
-    new_items = [(d, t, l) for d, t, l in items if d.astimezone(KST).date() >= today_kst]
-
-    # Sort old items by original date
-    old_items.sort(key=lambda x: x[0])
-    new_items.sort(key=lambda x: x[0])
-
-    ordered_items = old_items + new_items  # Post old → new
-
-    for pub_date, title, link in ordered_items:
-        if link in posted:
-            log(f"[SKIPPED] {title} (already posted)")
-            continue
-
-        post_title = format_title(pub_date, title)
-        try:
-            subreddit.submit(
-                title=post_title,
-                url=link,
-                flair_id=POST_FLAIR_ID
-            )
-            posted.add(link)
-            save_posted(posted)
-            log(f"{tag} {title}")
-            time.sleep(5)  # Avoid hitting Reddit API limits
-        except Exception as e:
-            log(f"[ERROR] Failed to post {title}: {e}")
-
-# ------------------ YOUTUBE FETCH ------------------
-def fetch_youtube_videos(channel_url):
-    try:
-        channel = Channel(channel_url)
-        videos = []
-        for video in channel.videos:
-            pub_date = video.publish_date
-            title = video.title
-            link = video.watch_url
-            videos.append((pub_date, title, link))
-        return videos
-    except Exception as e:
-        log(f"[ERROR] Failed to fetch YouTube videos: {e}")
-        return []
-
-# ------------------ RSS FEED FETCH ------------------
-def fetch_feed(feed_url):
-    try:
-        feed = feedparser.parse(feed_url)
-        items = []
-        for entry in feed.entries:
-            pub_date = datetime(*entry.published_parsed[:6], tzinfo=pytz.UTC)
-            title = entry.title
-            link = entry.link
-            items.append((pub_date, title, link))
-        return items
-    except Exception as e:
-        log(f"[ERROR] Failed to fetch feed: {e}")
-        return []
+def post_to_reddit(post, posted):
+    if post["url"] in posted:
+        return
+    title = format_title(post["title"], post["date"])
+    submission = reddit.subreddit(SUBREDDIT).submit(title, url=post["url"], flair_id=POST_FLAIR_ID)
+    print(f"Posted: {title}")
+    posted.append(post["url"])
+    save_posted(posted)
 
 # ------------------ MAIN LOOP ------------------
 def main():
+    posted = load_posted()
+
+    # ---- YouTube channels to monitor ----
+    channels = [
+        "CHANNEL_ID_XNGHAN",  # replace with actual channel ID
+        "CHANNEL_ID_SM",      # replace with actual channel ID
+    ]
+
+    # ---- RSS feeds to monitor ----
+    rss_feeds = [
+        "https://example.com/feed.xml",  # replace with actual RSS URLs
+    ]
+
     while True:
-        all_items = []
+        all_posts = []
 
-        # Example: fetch Xnghan channel videos
-        all_items += fetch_youtube_videos("https://www.youtube.com/@Xnghan")
+        # Fetch YouTube videos
+        for channel in channels:
+            videos = fetch_youtube_videos(channel)
+            all_posts.extend(videos)
 
-        # Example: fetch SM feed about Xnghan & Xoul debut
-        all_items += fetch_feed("https://sm-feed-example.com/rss")
+        # Fetch RSS articles
+        for feed in rss_feeds:
+            articles = fetch_rss_articles(feed)
+            all_posts.extend(articles)
 
-        if all_items:
-            post_items(all_items)
+        # Sort all posts by date
+        all_posts.sort(key=lambda x: x["date"])
 
-        log("Sleeping 30 minutes before next check...")
-        time.sleep(1800)
+        # Post in order
+        for post in all_posts:
+            post_to_reddit(post, posted)
+
+        print("Sleeping 5 minutes...")
+        time.sleep(300)  # 5 min
 
 if __name__ == "__main__":
     main()
