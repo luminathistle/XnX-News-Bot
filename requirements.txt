@@ -1,8 +1,8 @@
-praw==7.7.0
-google-api-python-client==2.99.0
-google-auth==2.22.0
-google-auth-oauthlib==1.2.0
-feedparser==6.0.10
-requests==2.31.0
-beautifulsoup4==4.12.2
-pytz==2025.7
+praw
+google-api-python-client
+google-auth
+google-auth-oauthlib
+feedparser
+requests
+beautifulsoup4
+pytz
