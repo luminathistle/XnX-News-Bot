@@ -3,4 +3,5 @@ feedparser
 requests
 beautifulsoup4
 pytz
-pytube
+google-api-python-client
+google-auth
