@@ -26,20 +26,25 @@ youtube = build("youtube", "v3", developerKey=os.getenv("YOUTUBE_API_KEY"))
 # ------------------ FILTER KEYS ------------------
 KEYWORDS = ["xnghan", "xoul", "승한", "엑스한", "승한앤소울"]
 
+
 def contains_keyword(text: str) -> bool:
     return any(k.lower() in text.lower() for k in KEYWORDS)
+
 
 # ------------------ HELPERS ------------------
 def load_posted():
     return json.load(open(POSTED_FILE, "r", encoding="utf-8")) if os.path.exists(POSTED_FILE) else []
 
+
 def save_posted(posted):
     json.dump(posted, open(POSTED_FILE, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
+
 
 def format_title(title: str, original_dt: datetime) -> str:
     today = datetime.now(TIMEZONE).strftime("%Y-%m-%d")
     orig_date = original_dt.astimezone(TIMEZONE).strftime("%Y-%m-%d")
     return f"[{today} / {orig_date}] - {title}" if orig_date < today else f"[{today}] - {title}"
+
 
 def fetch_youtube_videos(channel_id: str):
     videos, token = [], None
@@ -52,12 +57,17 @@ def fetch_youtube_videos(channel_id: str):
             title = i["snippet"]["title"]
             if not contains_keyword(title):
                 continue
-            dt = datetime.fromisoformat(i["snippet"]["publishedAt"].replace("Z","+00:00"))
-            videos.append({"url":f"https://youtu.be/{i['id']['videoId']}",
-                          "title":title, "date":dt})
+            dt = datetime.fromisoformat(i["snippet"]["publishedAt"].replace("Z", "+00:00"))
+            videos.append({
+                "url": f"https://youtu.be/{i['id']['videoId']}",
+                "title": title,
+                "date": dt
+            })
         token = res.get("nextPageToken")
-        if not token: break
+        if not token:
+            break
     return sorted(videos, key=lambda x: x["date"])
+
 
 def fetch_weverse_feed():
     url = "https://weverse.io/xnghanandxoul/media/rss"
@@ -67,8 +77,13 @@ def fetch_weverse_feed():
         if not contains_keyword(e.title):
             continue
         dt = datetime(*e.published_parsed[:6], tzinfo=timezone.utc)
-        posts.append({"url": e.link, "title": e.title, "date": dt})
+        posts.append({
+            "url": e.link,
+            "title": e.title,
+            "date": dt
+        })
     return sorted(posts, key=lambda x: x["date"])
+
 
 def post_if_new(post, posted):
     if post["url"] in posted:
@@ -78,6 +93,7 @@ def post_if_new(post, posted):
     posted.append(post["url"])
     print("Posted:", title)
     return True
+
 
 # ------------------ MAIN LOOP ------------------
 def main():
@@ -110,10 +126,6 @@ def main():
 
         time.sleep(300)
 
-if __name__ == "__main__":
-    main()
-        print("Sleeping 5 minutes...")
-        time.sleep(300)  # 5 min
 
 if __name__ == "__main__":
     main()
